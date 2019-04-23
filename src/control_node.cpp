@@ -12,6 +12,7 @@
 #include <mavros_msgs/PositionTarget.h>
 
 #include <aa241x_mission/SensorMeasurement.h>
+#include <aa241x_mission/MissionState.h>
 
 enum class MissionElement {
 	None,
@@ -103,7 +104,7 @@ private:
 	 * this includes the offset information for the lake lag coordinate frame
 	 * @param msg mission state
 	 */
-	void missionStateCallback(onst aa241x_mission::MissionState::ConstPtr& msg);
+	void missionStateCallback(const aa241x_mission::MissionState::ConstPtr& msg);
 
 	//void apRangeCallback(const aa241x_student::APRange::ConstPtr& msg);
 
@@ -129,7 +130,7 @@ _flight_alt(flight_alt)
 	_state_sub = _nh.subscribe<mavros_msgs::State>("mavros/state", 1, &ControlNode::stateCallback, this);
 	_local_pos_sub = _nh.subscribe<geometry_msgs::PoseStamped>("/mavros/local_position/pose", 1, &ControlNode::localPosCallback, this);
 	_sensor_meas_sub =_nh.subscribe<aa241x_mission::SensorMeasurement>("measurement", 10, &ControlNode::sensorMeasCallback, this);
-	_mission_state_sub = _nh.subscribe<aa241x_mission::SensorMeasurement>("mission_state", 10, &ControlNode::sensorMeasCallback, this);
+	_mission_state_sub = _nh.subscribe<aa241x_mission::MissionState>("mission_state", 10, &ControlNode::missionStateCallback, this);
 	//_landing_range_sub = _nh.subscribe<aa241x_student::APRange>("ap_range", 10, &ControlNode::apRangeCallback, this);
 
 	// advertise the published detailed
@@ -162,21 +163,18 @@ void ControlNode::localPosCallback(const geometry_msgs::PoseStamped::ConstPtr& m
 		case MissionElement::None:
 			// NOTE: nothing to do here, waiting on the state to be connected
 			break;
-		case Takeoff:
+		case MissionElement::Takeoff:
 			// check condition on being "close enough" to the waypoint
-			if (abs(_current_local_pos.pose.position.z - _target_alt) < 0.1) {
+			if (abs(_current_local_pos.pose.position.z - _target_alt - _u_offset) < 0.5) {
 				// change to being in the searching state
 				_mission_element = MissionElement::Searching;
 			}
 
 			break;
-		case Searching:
+		case MissionElement::Searching:
 			break;
-		case Landing:
+		case MissionElement::Landing:
 			break;
-
-		default:
-			// TODO: nothing to do here
 	}
 }
 
@@ -187,7 +185,7 @@ void ControlNode::sensorMeasCallback(const aa241x_mission::SensorMeasurement::Co
 	// want to move this information to a mission handling node
 }
 
-void missionStateCallback(onst aa241x_mission::MissionState::ConstPtr& msg) {
+void ControlNode::missionStateCallback(const aa241x_mission::MissionState::ConstPtr& msg) {
 	// save the offset information
 	_e_offset = msg->e_offset;
 	_n_offset = msg->n_offset;
@@ -322,8 +320,8 @@ int ControlNode::run() {
 			float ang = atan2(-_current_local_pos.pose.position.x, -_current_local_pos.pose.position.y);
 
 			// fly at 5m/s
-			float ve = 5.0f * sin(ang - 80 * M_PI/180.0f);
-			float vn = 5.0f * cos(ang - 80 * M_PI/180.0f);
+			float ve = 8.0f * sin(ang - 60 * M_PI/180.0f);
+			float vn = 8.0f * cos(ang - 60 * M_PI/180.0f);
 
 			vel.x = ve;
 			vel.y = vn;
