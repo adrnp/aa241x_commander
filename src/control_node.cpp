@@ -13,6 +13,13 @@
 
 #include <aa241x_mission/SensorMeasurement.h>
 
+enum class MissionElement {
+	None,
+	Takeoff,
+	Searching,
+	Landing
+};
+
 /**
  * class to contain the functionality of the controller node.
  */
@@ -47,14 +54,21 @@ private:
 	geometry_msgs::PoseStamped _current_local_pos;
 
 	// waypoint handling (example)
+	MissionElement _mission_element = MissionElement::None;
 	int _wp_index = -1;
 	int _n_waypoints = 1;
 	float _target_alt = 0.0f;
+
+	// offset information
+	float _e_offset = 0.0f;
+	float _n_offset = 0.0f;
+	float _u_offset = 0.0f;
 
 	// subscribers
 	ros::Subscriber _state_sub;			// the current state of the pixhawk
 	ros::Subscriber _local_pos_sub;		// local position information
 	ros::Subscriber _sensor_meas_sub;	// mission sensor measurement
+	ros::Subscriber _mission_state_sub;	// mission state
 	ros::Subscriber _landing_range_sub;	// measurement from the imaging node
 	// TODO: add subscribers here
 
@@ -84,6 +98,13 @@ private:
 	 */
 	void sensorMeasCallback(const aa241x_mission::SensorMeasurement::ConstPtr& msg);
 
+	/**
+	 * callback for the mission state for the AA241x mission
+	 * this includes the offset information for the lake lag coordinate frame
+	 * @param msg mission state
+	 */
+	void missionStateCallback(onst aa241x_mission::MissionState::ConstPtr& msg);
+
 	//void apRangeCallback(const aa241x_student::APRange::ConstPtr& msg);
 
 	// TODO: add callbacks here
@@ -108,6 +129,7 @@ _flight_alt(flight_alt)
 	_state_sub = _nh.subscribe<mavros_msgs::State>("mavros/state", 1, &ControlNode::stateCallback, this);
 	_local_pos_sub = _nh.subscribe<geometry_msgs::PoseStamped>("/mavros/local_position/pose", 1, &ControlNode::localPosCallback, this);
 	_sensor_meas_sub =_nh.subscribe<aa241x_mission::SensorMeasurement>("measurement", 10, &ControlNode::sensorMeasCallback, this);
+	_mission_state_sub = _nh.subscribe<aa241x_mission::SensorMeasurement>("mission_state", 10, &ControlNode::sensorMeasCallback, this);
 	//_landing_range_sub = _nh.subscribe<aa241x_student::APRange>("ap_range", 10, &ControlNode::apRangeCallback, this);
 
 	// advertise the published detailed
@@ -128,17 +150,33 @@ void ControlNode::localPosCallback(const geometry_msgs::PoseStamped::ConstPtr& m
 	// TODO: account for offset to convert from PX4 coordinate to lake lag frame
 	_current_local_pos = *msg;
 
+	// update adjust the local position with the offset information to convert
+	// to lake lag coordinate frame
+	_current_local_pos.pose.position.x += _e_offset;
+	_current_local_pos.pose.position.y += _n_offset;
+	_current_local_pos.pose.position.z += _u_offset;
+
 	// check to see if have completed the waypoint
 	// NOTE: for this case we only have a single waypoint
-	if (_wp_index == 0) {
-		float current_alt = _current_local_pos.pose.position.z;
+	switch (_mission_element) {
+		case MissionElement::None:
+			// NOTE: nothing to do here, waiting on the state to be connected
+			break;
+		case Takeoff:
+			// check condition on being "close enough" to the waypoint
+			if (abs(_current_local_pos.pose.position.z - _target_alt) < 0.1) {
+				// change to being in the searching state
+				_mission_element = MissionElement::Searching;
+			}
 
-		// check condition on being "close enough" to the waypoint
-		if (abs(current_alt - _target_alt) < 0.1) {
-			// update the target altitude to land, and increment the waypoint
-			_target_alt = 0;
-			_wp_index++;
-		}
+			break;
+		case Searching:
+			break;
+		case Landing:
+			break;
+
+		default:
+			// TODO: nothing to do here
 	}
 }
 
@@ -147,6 +185,13 @@ void ControlNode::sensorMeasCallback(const aa241x_mission::SensorMeasurement::Co
 
 	// NOTE: this callback is for an example of how to setup a callback, you may
 	// want to move this information to a mission handling node
+}
+
+void missionStateCallback(onst aa241x_mission::MissionState::ConstPtr& msg) {
+	// save the offset information
+	_e_offset = msg->e_offset;
+	_n_offset = msg->n_offset;
+	_u_offset = msg->u_offset;
 }
 
 /*
@@ -172,6 +217,25 @@ int ControlNode::run() {
 	waitForFCUConnection();
 	ROS_INFO("connected to the FCU");
 
+	// TODO: move these to be static defines maybe (?)
+	uint16_t position_control_mask = (mavros_msgs::PositionTarget::IGNORE_VX |
+		mavros_msgs::PositionTarget::IGNORE_VY |
+		mavros_msgs::PositionTarget::IGNORE_VZ |
+		mavros_msgs::PositionTarget::IGNORE_AFX |
+		mavros_msgs::PositionTarget::IGNORE_AFY |
+		mavros_msgs::PositionTarget::IGNORE_AFZ |
+		mavros_msgs::PositionTarget::IGNORE_YAW_RATE);
+
+	uint16_t velocity_control_mask = (mavros_msgs::PositionTarget::IGNORE_PX |
+		mavros_msgs::PositionTarget::IGNORE_PY |
+		mavros_msgs::PositionTarget::IGNORE_PZ |
+		mavros_msgs::PositionTarget::IGNORE_AFX |
+		mavros_msgs::PositionTarget::IGNORE_AFY |
+		mavros_msgs::PositionTarget::IGNORE_AFZ |
+		mavros_msgs::PositionTarget::IGNORE_YAW_RATE);
+
+	uint16_t custom_mask = 2499;
+
 	// set up the general command parameters
 	// NOTE: these will be true for all commands send
 	mavros_msgs::PositionTarget cmd;
@@ -180,13 +244,8 @@ int ControlNode::run() {
 	// configure the type mask to command only position information
 	// NOTE: type mask sets the fields to IGNORE
 	// TODO: need to add a link to the mask to explain the value
-	cmd.type_mask = (mavros_msgs::PositionTarget::IGNORE_VX |
-		mavros_msgs::PositionTarget::IGNORE_VY |
-		mavros_msgs::PositionTarget::IGNORE_VZ |
-		mavros_msgs::PositionTarget::IGNORE_AFX |
-		mavros_msgs::PositionTarget::IGNORE_AFY |
-		mavros_msgs::PositionTarget::IGNORE_AFZ |
-		mavros_msgs::PositionTarget::IGNORE_YAW_RATE);
+	cmd.type_mask = position_control_mask;
+
 
 	// cmd.type_mask = 2499;  // mask for Vx Vy and Pz control
 
@@ -249,19 +308,41 @@ int ControlNode::run() {
 		// at this point the pixhawk is in offboard control, so we can now fly
 		// the drone as desired
 
-		// set the first waypoint
-		if (_wp_index < 0) {
-			_wp_index = 0;
+		// change to the waiting state since now in offboard control
+		if (_mission_element == MissionElement::None) {
+			_mission_element = MissionElement::Takeoff;
 			_target_alt = _flight_alt;
 		}
 
-		// TODO: populate the control elements desired
-		//
-		// in this case, just asking the pixhawk to takeoff to the _target_alt
-		// height
-		pos.x = 0;
-		pos.y = 0;
-		pos.z = _target_alt;
+		// if in the searching state, going to want to send a velocity command
+		if (_mission_element == MissionElement::Searching) {
+			cmd.type_mask = custom_mask;
+
+			// compute vn and ve
+			float ang = atan2(-_current_local_pos.pose.position.x, -_current_local_pos.pose.position.y);
+
+			// fly at 5m/s
+			float ve = 5.0f * sin(ang - 80 * M_PI/180.0f);
+			float vn = 5.0f * cos(ang - 80 * M_PI/180.0f);
+
+			vel.x = ve;
+			vel.y = vn;
+			pos.z = _target_alt;
+
+		} else {
+
+			// sending a position command
+			cmd.type_mask = position_control_mask;
+
+			// TODO: populate the control elements desired
+			//
+			// in this case, just asking the pixhawk to takeoff to the _target_alt
+			// height
+			pos.x = 0;
+			pos.y = 0;
+			pos.z = _target_alt;
+		}
+
 
 		// publish the command
 		cmd.header.stamp = ros::Time::now();
