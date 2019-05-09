@@ -32,13 +32,19 @@ public:
 	 * example constructor.
 	 * @param flight_alt the desired altitude for the takeoff point.
 	 */
-	ControlNode(float flight_alt);
+	ControlNode(float flight_alt, float flight_speed);
 
 	/**
 	 * the main loop to be run for this node (called by the `main` function)
 	 * @return exit code
 	 */
 	int run();
+
+	/**
+	 * allow setting the mission element manually to force different modes of operation
+	 * @param element the mission element to change to
+	 */
+	inline void setMissionElement(MissionElement element) { _mission_element = element; };
 
 
 private:
@@ -49,10 +55,12 @@ private:
 
 	// TODO: add any settings, etc, here
 	float _flight_alt = 20.0f;		// desired flight altitude [m] AGL (above takeoff)
+	float _flight_speed = 4.0f;
 
 	// data
 	mavros_msgs::State _current_state;
 	geometry_msgs::PoseStamped _current_local_pos;
+	geometry_msgs::PoseStamped _landing_range;
 
 	// waypoint handling (example)
 	MissionElement _mission_element = MissionElement::None;
@@ -106,7 +114,11 @@ private:
 	 */
 	void missionStateCallback(const aa241x_mission::MissionState::ConstPtr& msg);
 
-	//void apRangeCallback(const aa241x_student::APRange::ConstPtr& msg);
+	/**
+	 * callback for the relative vector to the tag for auto landing.
+	 * @param msg the landing tag's relative position
+	 */
+	void landingPoseCallback(const geometry_msgs::PoseStamped::ConstPtr& msg);
 
 	// TODO: add callbacks here
 
@@ -121,17 +133,17 @@ private:
 };
 
 
-ControlNode::ControlNode(float flight_alt) :
-_flight_alt(flight_alt)
+ControlNode::ControlNode(float flight_alt, float flight_speed) :
+_flight_alt(flight_alt),
+_flight_speed(flight_speed)
 {
-
 
 	// subscribe to the desired topics
 	_state_sub = _nh.subscribe<mavros_msgs::State>("mavros/state", 1, &ControlNode::stateCallback, this);
 	_local_pos_sub = _nh.subscribe<geometry_msgs::PoseStamped>("/mavros/local_position/pose", 1, &ControlNode::localPosCallback, this);
 	_sensor_meas_sub =_nh.subscribe<aa241x_mission::SensorMeasurement>("measurement", 10, &ControlNode::sensorMeasCallback, this);
 	_mission_state_sub = _nh.subscribe<aa241x_mission::MissionState>("mission_state", 10, &ControlNode::missionStateCallback, this);
-	//_landing_range_sub = _nh.subscribe<aa241x_student::APRange>("ap_range", 10, &ControlNode::apRangeCallback, this);
+	_landing_range_sub = _nh.subscribe<geometry_msgs::PoseStamped>("landing_pose", 10, &ControlNode::landingPoseCallback, this);
 
 	// advertise the published detailed
 
@@ -192,12 +204,10 @@ void ControlNode::missionStateCallback(const aa241x_mission::MissionState::Const
 	_u_offset = msg->u_offset;
 }
 
-/*
-void ControlNode::apRangeCallback(const aa241x_student::APRange::ConstPtr& msg) {
-	// TODO: decide what to do with the range measurement here
-	// TODO: basically writing some of the controller in this callback
+void landingPoseCallback(const geometry_msgs::PoseStamped::ConstPtr& msg) {
+	// save the landing range locally -> will just be doing control from this range itself
+	_landing_range = *msg;
 }
-*/
 
 void ControlNode::waitForFCUConnection() {
 	// wait for FCU connection by just spinning the callback until connected
@@ -249,7 +259,7 @@ int ControlNode::run() {
 
 	// the yaw information
 	// NOTE: just keeping the heading north
-	cmd.yaw = 0;
+	cmd.yaw = 1.5707;	// north in [rad] in an ENU frame
 
 	// the position information for the command
 	// NOTE: this is defined in ENU
@@ -306,39 +316,83 @@ int ControlNode::run() {
 		// at this point the pixhawk is in offboard control, so we can now fly
 		// the drone as desired
 
-		// change to the waiting state since now in offboard control
-		if (_mission_element == MissionElement::None) {
-			_mission_element = MissionElement::Takeoff;
-			_target_alt = _flight_alt;
-		}
 
-		// if in the searching state, going to want to send a velocity command
-		if (_mission_element == MissionElement::Searching) {
-			cmd.type_mask = custom_mask;
+		// handle the control based on the current mission element
+		switch (_mission_element) {
 
-			// compute vn and ve
-			float ang = atan2(-_current_local_pos.pose.position.x, -_current_local_pos.pose.position.y);
+			case MissionElement::None:
+			{
+				// just transition straight to taking off
+				_mission_element = MissionElement::Takeoff;
+				_target_alt = _flight_alt;
+				break;
+			}
+			case MissionElement::Takeoff:
+			{
+				// sending a position command
+				cmd.type_mask = position_control_mask;
 
-			// fly at 5m/s
-			float ve = 8.0f * sin(ang - 60 * M_PI/180.0f);
-			float vn = 8.0f * cos(ang - 60 * M_PI/180.0f);
+				// in this case, just asking the pixhawk to takeoff to the _target_alt
+				// height
+				pos.x = 0;
+				pos.y = 0;
+				pos.z = _target_alt;
 
-			vel.x = ve;
-			vel.y = vn;
-			pos.z = _target_alt;
+				break;
+			}
+			case MissionElement::Searching:
+			{
+				// want to do lateral velocity control and let the pixhawk take care of holding altitude
+				cmd.type_mask = custom_mask;
 
-		} else {
+				// compute vn and ve as an inward spiral
+				float ang = atan2(-_current_local_pos.pose.position.x, -_current_local_pos.pose.position.y);
 
-			// sending a position command
-			cmd.type_mask = position_control_mask;
+				// fly at 8m/s
+				float ve = _flight_speed * sin(ang - 60 * M_PI/180.0f);
+				float vn = _flight_speed * cos(ang - 60 * M_PI/180.0f);
 
-			// TODO: populate the control elements desired
-			//
-			// in this case, just asking the pixhawk to takeoff to the _target_alt
-			// height
-			pos.x = 0;
-			pos.y = 0;
-			pos.z = _target_alt;
+				vel.x = ve;
+				vel.y = vn;
+				pos.z = _target_alt;
+
+				break;
+			}
+			case MissionElement::Landing:
+			{
+				// velocity control in all directions
+				cmd.type_mask = velocity_control_mask;
+
+				// TODO: compute some gains for this.... might do it low for now
+
+				// NOTE: I'm not account for heading!!!! I'm assuming that the vehicle is being flown pointing north
+				// and that the camera in mounted in an orientation such that the camera x axis is out the right and y is out the back
+
+				// range I believe is in camera frame, so for a downward facing camera
+				// x -> out the right
+				// y -> out the back (down in the image frame itself)
+				// z -> down (into the image in the image frame itself)
+
+				ve = 0.5f * _landing_range.pose.position.x;  // NOTE: there are also no safeguards if the target isn't seen...
+				vn = -0.5f * _landing_range.pose.position.y;
+				vz = -0.1f * _landing_range.pose.position.z;		// NOTE: really should get over the tag before landing
+
+				// set the velocities
+				vel.x = ve;
+				vel.y = vn;
+				vel.z = vz;
+
+				break;
+			}
+			default:
+
+				// don't move -> 0 velocity
+				cmd.type_mask = velocity_control_mask;
+				vel.x = 0.0f;
+				vel.y = 0.0f;
+				vel.z = 0.0f;
+
+				break;
 		}
 
 
@@ -366,10 +420,19 @@ int main(int argc, char **argv) {
 	// get parameters from the launch file which define some mission
 	// settings
 	ros::NodeHandle private_nh("~");
-	// TODO: determine settings
+	bool start_in_landing;
+	float flight_alt, flight_speed;
+	private_nh.param("start_in_landing", start_in_landing, false);
+	private_nh.param("flight_altitude", flight_alt, 20.0f);
+	private_nh.param("flight_speed", flight_speed, 4.0f);
+
 
 	// create the node
-	ControlNode node(20.0f);
+	ControlNode node(flight_alt, flight_speed);
+
+	if (start_in_landing) {
+		node.setMissionElement(MissionElement::Landing);
+	}
 
 	// run the node
 	return node.run();
