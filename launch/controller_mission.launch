@@ -10,7 +10,7 @@
 		<!-- TODO: decide if this should be local or the one for the laptop -->
 	</include>
 
-	<include file="$(find aa241x_mission)/launch/mission.launch" >
+	<include file="$(find aa241x_mission)/launch/aa241x_mission.launch" >
 		<!-- TODO: decide if this should be local or the one for the laptop -->
 	</include>
 

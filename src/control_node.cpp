@@ -204,7 +204,7 @@ void ControlNode::missionStateCallback(const aa241x_mission::MissionState::Const
 	_u_offset = msg->u_offset;
 }
 
-void landingPoseCallback(const geometry_msgs::PoseStamped::ConstPtr& msg) {
+void ControlNode::landingPoseCallback(const geometry_msgs::PoseStamped::ConstPtr& msg) {
 	// save the landing range locally -> will just be doing control from this range itself
 	_landing_range = *msg;
 }
@@ -373,9 +373,9 @@ int ControlNode::run() {
 				// y -> out the back (down in the image frame itself)
 				// z -> down (into the image in the image frame itself)
 
-				ve = 0.5f * _landing_range.pose.position.x;  // NOTE: there are also no safeguards if the target isn't seen...
-				vn = -0.5f * _landing_range.pose.position.y;
-				vz = -0.1f * _landing_range.pose.position.z;		// NOTE: really should get over the tag before landing
+				float ve = 0.5f * _landing_range.pose.position.x;  // NOTE: there are also no safeguards if the target isn't seen...
+				float vn = -0.5f * _landing_range.pose.position.y;
+				float vz = -0.1f * _landing_range.pose.position.z;		// NOTE: really should get over the tag before landing
 
 				// set the velocities
 				vel.x = ve;
