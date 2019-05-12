@@ -252,7 +252,7 @@ int ControlNode::run() {
 	// configure the type mask to command only position information
 	// NOTE: type mask sets the fields to IGNORE
 	// TODO: need to add a link to the mask to explain the value
-	cmd.type_mask = position_control_mask;
+	cmd.type_mask = velocity_control_mask;
 
 
 	// cmd.type_mask = 2499;  // mask for Vx Vy and Pz control
@@ -288,12 +288,12 @@ int ControlNode::run() {
 		// NOTE: need to be streaming setpoints in order for offboard to be
 		// allowed, hence the publishing of an empty command
 		if (_current_state.mode != "OFFBOARD") {
-			// send command to stay in the same position
-			// TODO: if doing position command in the lake lag frame, make
-			// sure these values match the initial position of the drone!
-			pos.x = 0;
-			pos.y = 0;
-			pos.z = 0;
+
+			// send a position for 0 velocity in any direction
+			cmd.type_mask = velocity_control_mask;
+			vel.x = 0;
+			vel.y = 0;
+			vel.z = 0;
 
 			// timestamp the message and send it
 			cmd.header.stamp = ros::Time::now();
@@ -323,21 +323,19 @@ int ControlNode::run() {
 			case MissionElement::None:
 			{
 				// just transition straight to taking off
-				_mission_element = MissionElement::Takeoff;
+				_mission_element = MissionElement::Searching;
 				_target_alt = _flight_alt;
 				break;
 			}
 			case MissionElement::Takeoff:
 			{
 				// sending a position command
-				cmd.type_mask = position_control_mask;
+				cmd.type_mask = velocity_control_mask;
 
-				// in this case, just asking the pixhawk to takeoff to the _target_alt
-				// height
-				pos.x = 0;
-				pos.y = 0;
-				pos.z = _target_alt;
-
+				// TODO: would actually need to do a controller on velocity here
+				vel.x = 0;
+				vel.y = 0;
+				vel.z = 0;	// TODO: make this a gain based on altitude error
 				break;
 			}
 			case MissionElement::Searching:
