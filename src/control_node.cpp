@@ -234,7 +234,10 @@ void ControlNode::localPosCallback(const geometry_msgs::PoseStamped::ConstPtr& m
 			break;
 		case MissionElement::Takeoff:
 			// check condition on being "close enough" to the waypoint
+			ROS_INFO("altitude left: %0.2f", abs(_current_local_pos.pose.position.z - _target_alt));
 			if (abs(_current_local_pos.pose.position.z - _target_alt) < 0.5) {
+				ROS_INFO("takeoff completed!");
+
 				// change to being in the searching state
 				_mission_element = MissionElement::Searching;
 			}
@@ -422,7 +425,7 @@ int ControlNode::run() {
 			case MissionElement::None:
 			{
 				// just transition straight to taking off
-				_mission_element = MissionElement::Searching;
+				_mission_element = MissionElement::Takeoff;
 				_target_alt = _flight_alt;
 				break;
 			}
@@ -432,7 +435,7 @@ int ControlNode::run() {
 				cmd.type_mask = velocity_control_mask;
 
 				// compute the command for vz based on the error in pz
-				float vz_cmd = _vz_p * (_current_local_pos.pose.position.z - _target_alt);
+				float vz_cmd = _vz_p * (_target_alt - _current_local_pos.pose.position.z);
 				saturate(&vz_cmd, _max_vz);
 
 				// set the control for x and y to 0 and z to the desired command
@@ -529,6 +532,8 @@ int ControlNode::run() {
 				break;
 		}
 
+		// DEBUG
+		ROS_INFO("command: (%0.2f, %0.2f, %0.2f)", vel.x, vel.y, vel.z);
 
 		// publish the command
 		cmd.header.stamp = ros::Time::now();
