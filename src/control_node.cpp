@@ -13,6 +13,7 @@
 
 #include <aa241x_mission/SensorMeasurement.h>
 #include <aa241x_mission/MissionState.h>
+#include <aa241x_mission/CoordinateConversion.h>
 
 enum class MissionElement {
 	None,			// not in any phase of the mission
@@ -96,7 +97,15 @@ private:
 	float _search_height = 5.0f;	// altitude above the lake level to come down to when landing in triggered
 	float _landing_n = 0.0f;	// TODO: figure out how to get the rough coordinates for the landing platform
 	float _landing_e = 0.0f;
-	float _landung_u = 0.0f;
+	float _landing_u = 0.0f;
+
+	// landing coordinates in GPS -> this should be set in the launch file!
+	double _landing_lat = 0.0f;
+	double _landing_lon = 0.0f;
+	double _landing_alt = 0.0f;
+
+	// TODO: maybe this should be set in the mission launch file...
+	// and then the request is just for the information....
 
 
 	// data
@@ -126,6 +135,9 @@ private:
 	// publishers
 	ros::Publisher _cmd_pub;
 	// TODO: recommend adding publishers for data you might want to log
+
+	// service client for coordinate conversion
+	ros::ServiceClient _coord_conversion_client;
 
 	// callbacks
 
@@ -193,6 +205,9 @@ _flight_speed(flight_speed)
 	// mavros subscribes to in order to send commands to the pixhawk
 	_cmd_pub = _nh.advertise<mavros_msgs::PositionTarget>("mavros/setpoint_raw/local", 1);
 
+	// set up client to coordinate conversion
+	_coord_conversion_client = _nh.serviceClient<aa241x_mission::CoordinateConversion>("gps_to_lake_lag");
+
 }
 
 void ControlNode::stateCallback(const mavros_msgs::State::ConstPtr& msg) {
@@ -228,6 +243,8 @@ void ControlNode::localPosCallback(const geometry_msgs::PoseStamped::ConstPtr& m
 		case MissionElement::Searching:
 			break;
 		case MissionElement::Landing:
+			break;
+		default:
 			break;
 	}
 }
@@ -344,6 +361,19 @@ int ControlNode::run() {
 	// TODO: call the mission service to convert the landing GPS coordinates
 	// into Lake Lag frame coordinates
 
+	// get the landing position
+	aa241x_mission::CoordinateConversion srv;
+	srv.request.latitude = _landing_lat;
+	srv.request.longitude = _landing_lon;
+	srv.request.altitude = _landing_alt;
+	if (_coord_conversion_client.call(srv)) {
+		_landing_e = srv.response.east;
+		_landing_n = srv.response.north;
+		_landing_u = srv.response.up;
+	} else {
+		ROS_ERROR("unable to get landing location in Lake Lag frame!");
+	}
+
 	// set the loop rate in [Hz]
 	// NOTE: must be faster than 2Hz
 	ros::Rate rate(10.0);
@@ -425,7 +455,7 @@ int ControlNode::run() {
 
 				vel.x = ve;
 				vel.y = vn;
-				pos.z = _target_alt - u_offset;  // TODO: verify the math on this...
+				pos.z = _target_alt - _u_offset;  // TODO: verify the math on this...
 
 				break;
 			}
@@ -441,8 +471,8 @@ int ControlNode::run() {
 
 				// saturate the commands
 				saturate(&ve, _max_vxy);
-				saturate(%vn, _max_vxy);
-				saturate(&nu, _max_vz);
+				saturate(&vn, _max_vxy);
+				saturate(&vu, _max_vz);
 
 				vel.x = ve;
 				vel.y = vn;
