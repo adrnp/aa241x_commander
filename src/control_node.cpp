@@ -112,6 +112,7 @@ private:
 	mavros_msgs::State _current_state;
 	geometry_msgs::PoseStamped _current_local_pos;
 	geometry_msgs::PoseStamped _landing_range;
+	float _takeoff_home_height = 0.0f;		// the z position of the drone when takeoff was commanded
 
 	// waypoint handling (example)
 	MissionElement _mission_element = MissionElement::None;
@@ -426,7 +427,8 @@ int ControlNode::run() {
 			{
 				// just transition straight to taking off
 				_mission_element = MissionElement::Takeoff;
-				_target_alt = _flight_alt;
+				_target_alt = _flight_alt + _current_local_pos.pose.position.z;
+				_takeoff_home_height = _current_local_pos.pose.position.z;
 				break;
 			}
 			case MissionElement::Takeoff:
