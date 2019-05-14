@@ -15,11 +15,28 @@
 #include <aa241x_mission/MissionState.h>
 
 enum class MissionElement {
-	None,
-	Takeoff,
-	Searching,
-	Landing
+	None,			// not in any phase of the mission
+	Takeoff,		// taking off
+	Searching,		// looking for people
+	LandingPrep,	// go to the lake lag coordinates of the landing zone
+	Landing,		// april tag has been acquired so should start landing
+	Finished		// landing is complete, kill the motors
 };
+
+
+/**
+ * helper function to saturate a control command
+ * @param cmd   the command value to check
+ * @param limit the limit on the command mangitude
+ */
+inline void saturate(float* cmd, float limit) {
+	if (*cmd < -limit) {
+		*cmd = -limit;
+	} else if (*cmd > limit) {
+		*cmd = limit;
+	}
+}
+
 
 /**
  * class to contain the functionality of the controller node.
@@ -56,6 +73,31 @@ private:
 	// TODO: add any settings, etc, here
 	float _flight_alt = 20.0f;		// desired flight altitude [m] AGL (above takeoff)
 	float _flight_speed = 4.0f;
+
+	// gains
+	// TODO: import these from a config file or something (e.g. a yaml file like the camera parameters???)
+	float _vz_p = 0.5f;
+	float _vxy_p = 0.5f;
+
+	// limits for saturating control commands
+	float _max_vz = 3.0f;
+	float _max_vxy = 4.0f;
+
+	// landing related gain
+	float _landing_vz_p = 0.2f;
+	float _landing_vxy_p = 0.1f;
+	float _landing_max_vz = 1.0f;
+	float _landing_max_vxy = 1.0f;
+
+	// landing related information
+	float _last_range_time = 0.0f;
+	int _successive_range_count = 0;
+	int _successive_range_thresh = 5;
+	float _search_height = 5.0f;	// altitude above the lake level to come down to when landing in triggered
+	float _landing_n = 0.0f;	// TODO: figure out how to get the rough coordinates for the landing platform
+	float _landing_e = 0.0f;
+	float _landung_u = 0.0f;
+
 
 	// data
 	mavros_msgs::State _current_state;
@@ -177,7 +219,7 @@ void ControlNode::localPosCallback(const geometry_msgs::PoseStamped::ConstPtr& m
 			break;
 		case MissionElement::Takeoff:
 			// check condition on being "close enough" to the waypoint
-			if (abs(_current_local_pos.pose.position.z - _target_alt - _u_offset) < 0.5) {
+			if (abs(_current_local_pos.pose.position.z - _target_alt) < 0.5) {
 				// change to being in the searching state
 				_mission_element = MissionElement::Searching;
 			}
@@ -207,6 +249,30 @@ void ControlNode::missionStateCallback(const aa241x_mission::MissionState::Const
 void ControlNode::landingPoseCallback(const geometry_msgs::PoseStamped::ConstPtr& msg) {
 	// save the landing range locally -> will just be doing control from this range itself
 	_landing_range = *msg;
+
+	float time_since_last = _landing_range.header.stamp.toSec() - _last_range_time;
+
+	// if the last time a range was given was within the last 0.5 sec, then call this a successive range measurement
+	if (time_since_last < 0.5) {
+		_successive_range_count++;
+	} else {
+		_successive_range_count = 0;
+	}
+
+	// if we are in the landing prep phase and have received successive tag
+	// ranges at least 5 times, going to switch to the landing phase
+	//
+	// NOTE: this kind of check should probably be done in the vision node and not here,
+	// but putting it in here for now
+	if (_mission_element == MissionElement::LandingPrep && _successive_range_count >= _successive_range_thresh) {
+		_mission_element = MissionElement::Landing;
+	} else if (_mission_element == MissionElement::Landing && _successive_range_count == 0) {
+		// if we are landing but we lose sight of the tags, go back to the prep position
+		_mission_element = MissionElement::LandingPrep;
+	}
+
+	// update the timestamp for the last range time
+	_last_range_time = _landing_range.header.stamp.toSec();
 }
 
 void ControlNode::waitForFCUConnection() {
@@ -275,6 +341,9 @@ int ControlNode::run() {
 	vel.y = 0;	// N
 	vel.z = 0;	// U
 
+	// TODO: call the mission service to convert the landing GPS coordinates
+	// into Lake Lag frame coordinates
+
 	// set the loop rate in [Hz]
 	// NOTE: must be faster than 2Hz
 	ros::Rate rate(10.0);
@@ -329,13 +398,17 @@ int ControlNode::run() {
 			}
 			case MissionElement::Takeoff:
 			{
-				// sending a position command
+				// do this with full velocity control
 				cmd.type_mask = velocity_control_mask;
 
-				// TODO: would actually need to do a controller on velocity here
+				// compute the command for vz based on the error in pz
+				float vz_cmd = _vz_p * (_current_local_pos.pose.position.z - _target_alt);
+				saturate(&vz_cmd, _max_vz);
+
+				// set the control for x and y to 0 and z to the desired command
 				vel.x = 0;
 				vel.y = 0;
-				vel.z = 0;	// TODO: make this a gain based on altitude error
+				vel.z = vz_cmd;
 				break;
 			}
 			case MissionElement::Searching:
@@ -352,7 +425,28 @@ int ControlNode::run() {
 
 				vel.x = ve;
 				vel.y = vn;
-				pos.z = _target_alt;
+				pos.z = _target_alt - u_offset;  // TODO: verify the math on this...
+
+				break;
+			}
+			case MissionElement::LandingPrep:
+			{
+				// do this with full velocity control
+				cmd.type_mask = velocity_control_mask;
+
+				// go to the estimated landing location
+				float ve = _vxy_p * (_current_local_pos.pose.position.x - _landing_e);
+				float vn = _vxy_p * (_current_local_pos.pose.position.y - _landing_n);
+				float vu = _vxy_p * (_current_local_pos.pose.position.z - (_landing_u + _search_height));
+
+				// saturate the commands
+				saturate(&ve, _max_vxy);
+				saturate(%vn, _max_vxy);
+				saturate(&nu, _max_vz);
+
+				vel.x = ve;
+				vel.y = vn;
+				vel.z = vu;
 
 				break;
 			}
@@ -371,9 +465,21 @@ int ControlNode::run() {
 				// y -> out the back (down in the image frame itself)
 				// z -> down (into the image in the image frame itself)
 
-				float ve = 0.5f * _landing_range.pose.position.x;  // NOTE: there are also no safeguards if the target isn't seen...
-				float vn = -0.5f * _landing_range.pose.position.y;
-				float vz = -0.1f * _landing_range.pose.position.z;		// NOTE: really should get over the tag before landing
+				float ve = _landing_vxy_p * _landing_range.pose.position.x;  // NOTE: there are also no safeguards if the target isn't seen...
+				float vn = -_landing_vxy_p * _landing_range.pose.position.y;
+				float vz = -_landing_vz_p * _landing_range.pose.position.z;		// NOTE: really should get over the tag before landing
+
+				// saturating all of these for very slow motion
+				saturate(&ve, _landing_max_vxy);
+				saturate(&vn, _landing_max_vxy);
+				saturate(&vz, _landing_max_vz);
+
+				// TODO: for an actual landing strategy, would want to line up
+				// with the truck bed and then get on top of it and then come down
+				// basically a 3 step process
+
+				// if the lateral position error is > 1m (for e.g.) should close
+				// the z loop around a target landing altitude
 
 				// set the velocities
 				vel.x = ve;
