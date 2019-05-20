@@ -14,6 +14,7 @@
 #include <aa241x_mission/SensorMeasurement.h>
 #include <aa241x_mission/MissionState.h>
 #include <aa241x_mission/CoordinateConversion.h>
+#include <aa241x_mission/RequestLandingPosition.h>
 
 enum class MissionElement {
 	None,			// not in any phase of the mission
