@@ -97,16 +97,6 @@ private:
 	float _search_height = 5.0f;	// altitude above the lake level to come down to when landing in triggered
 	float _landing_n = 0.0f;	// TODO: figure out how to get the rough coordinates for the landing platform
 	float _landing_e = 0.0f;
-	float _landing_u = 0.0f;
-
-	// landing coordinates in GPS -> this should be set in the launch file!
-	double _landing_lat = 0.0f;
-	double _landing_lon = 0.0f;
-	double _landing_alt = 0.0f;
-
-	// TODO: maybe this should be set in the mission launch file...
-	// and then the request is just for the information....
-
 
 	// data
 	mavros_msgs::State _current_state;
@@ -138,7 +128,7 @@ private:
 	// TODO: recommend adding publishers for data you might want to log
 
 	// service client for coordinate conversion
-	ros::ServiceClient _coord_conversion_client;
+	ros::ServiceClient _landing_loc_client;
 
 	// callbacks
 
@@ -207,7 +197,7 @@ _flight_speed(flight_speed)
 	_cmd_pub = _nh.advertise<mavros_msgs::PositionTarget>("mavros/setpoint_raw/local", 1);
 
 	// set up client to coordinate conversion
-	_coord_conversion_client = _nh.serviceClient<aa241x_mission::CoordinateConversion>("gps_to_lake_lag");
+	_landing_loc_client = _nh.serviceClient<aa241x_mission::RequestLandingPosition>("lake_lag_landing_loc");
 
 }
 
@@ -366,14 +356,10 @@ int ControlNode::run() {
 	// into Lake Lag frame coordinates
 
 	// get the landing position
-	aa241x_mission::CoordinateConversion srv;
-	srv.request.latitude = _landing_lat;
-	srv.request.longitude = _landing_lon;
-	srv.request.altitude = _landing_alt;
-	if (_coord_conversion_client.call(srv)) {
+	aa241x_mission::RequestLandingPosition srv;
+	if (_landing_loc_client.call(srv)) {
 		_landing_e = srv.response.east;
 		_landing_n = srv.response.north;
-		_landing_u = srv.response.up;
 	} else {
 		ROS_ERROR("unable to get landing location in Lake Lag frame!");
 	}
@@ -472,7 +458,7 @@ int ControlNode::run() {
 				// go to the estimated landing location
 				float ve = _vxy_p * (_current_local_pos.pose.position.x - _landing_e);
 				float vn = _vxy_p * (_current_local_pos.pose.position.y - _landing_n);
-				float vu = _vxy_p * (_current_local_pos.pose.position.z - (_landing_u + _search_height));
+				float vu = _vxy_p * (_current_local_pos.pose.position.z - _search_height);
 
 				// saturate the commands
 				saturate(&ve, _max_vxy);
