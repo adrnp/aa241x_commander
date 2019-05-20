@@ -12,10 +12,13 @@
 
 	<include file="$(find aa241x_mission)/launch/aa241x_mission.launch" >
 		<!-- TODO: decide if this should be local or the one for the laptop -->
+		<arg name="landing_lat" value="37.423767" />
+		<arg name="landing_lon" value="-122.177559" />
 	</include>
 
 	<!-- the control node -->
 	<node pkg="aa241x_commander" type="control_node" name="control_node" output="screen">
+		<param name="start_in_landing" value="true" />
     </node>
 
 	<!-- logging -->

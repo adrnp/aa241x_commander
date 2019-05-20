@@ -361,6 +361,7 @@ int ControlNode::run() {
 	if (_landing_loc_client.call(srv)) {
 		_landing_e = srv.response.east;
 		_landing_n = srv.response.north;
+		ROS_INFO("landing coordinate: (%0.2f, %0.2f)", _landing_n, _landing_e);
 	} else {
 		ROS_ERROR("unable to get landing location in Lake Lag frame!");
 	}
@@ -457,9 +458,9 @@ int ControlNode::run() {
 				cmd.type_mask = velocity_control_mask;
 
 				// go to the estimated landing location
-				float ve = _vxy_p * (_current_local_pos.pose.position.x - _landing_e);
-				float vn = _vxy_p * (_current_local_pos.pose.position.y - _landing_n);
-				float vu = _vxy_p * (_current_local_pos.pose.position.z - _search_height);
+				float ve = _vxy_p * (_landing_e - _current_local_pos.pose.position.x);
+				float vn = _vxy_p * (_landing_n - _current_local_pos.pose.position.y);
+				float vu = _vxy_p * (_search_height - _current_local_pos.pose.position.z);
 
 				// saturate the commands
 				saturate(&ve, _max_vxy);
@@ -522,7 +523,7 @@ int ControlNode::run() {
 		}
 
 		// DEBUG
-		ROS_INFO("command: (%0.2f, %0.2f, %0.2f)", vel.x, vel.y, vel.z);
+		//ROS_INFO("command: (%0.2f, %0.2f, %0.2f)", vel.x, vel.y, vel.z);
 
 		// publish the command
 		cmd.header.stamp = ros::Time::now();
@@ -559,7 +560,7 @@ int main(int argc, char **argv) {
 	ControlNode node(flight_alt, flight_speed);
 
 	if (start_in_landing) {
-		node.setMissionElement(MissionElement::Landing);
+		node.setMissionElement(MissionElement::LandingPrep);
 	}
 
 	// run the node
