@@ -7,6 +7,7 @@
 #include <ros/ros.h>
 
 // topic data
+#include <std_msgs/UInt8.h>
 #include <geometry_msgs/PoseStamped.h>
 #include <mavros_msgs/State.h>
 #include <mavros_msgs/PositionTarget.h>
@@ -126,6 +127,7 @@ private:
 
 	// publishers
 	ros::Publisher _cmd_pub;
+	ros::Publisher _mis_element_pub;
 	// TODO: recommend adding publishers for data you might want to log
 
 	// service client for coordinate conversion
@@ -175,7 +177,6 @@ private:
 	 */
 	void waitForFCUConnection();
 
-
 };
 
 
@@ -196,6 +197,7 @@ _flight_speed(flight_speed)
 	// publish a PositionTarget to the `/mavros/setpoint_raw/local` topic which
 	// mavros subscribes to in order to send commands to the pixhawk
 	_cmd_pub = _nh.advertise<mavros_msgs::PositionTarget>("mavros/setpoint_raw/local", 1);
+	_mis_element_pub = _nh.advertise<std_msgs::UInt8>("mission_element", 1);
 
 	// set up client to coordinate conversion
 	_landing_loc_client = _nh.serviceClient<aa241x_mission::RequestLandingPosition>("lake_lag_landing_loc");
@@ -296,7 +298,6 @@ void ControlNode::waitForFCUConnection() {
 	}
 }
 
-
 int ControlNode::run() {
 
 	// wait for the controller connection
@@ -366,6 +367,10 @@ int ControlNode::run() {
 		ROS_ERROR("unable to get landing location in Lake Lag frame!");
 	}
 
+	// mission element content
+	std_msgs::UInt8 element_msg;
+	element_msg.data = 0;
+
 	// set the loop rate in [Hz]
 	// NOTE: must be faster than 2Hz
 	ros::Rate rate(10.0);
@@ -413,6 +418,8 @@ int ControlNode::run() {
 
 			case MissionElement::None:
 			{
+				element_msg.data = 0;
+
 				// just transition straight to taking off
 				_mission_element = MissionElement::Takeoff;
 				_target_alt = _flight_alt + _current_local_pos.pose.position.z;
@@ -421,6 +428,8 @@ int ControlNode::run() {
 			}
 			case MissionElement::Takeoff:
 			{
+				element_msg.data = 1;
+
 				// do this with full velocity control
 				cmd.type_mask = velocity_control_mask;
 
@@ -436,6 +445,8 @@ int ControlNode::run() {
 			}
 			case MissionElement::Searching:
 			{
+				element_msg.data = 2;
+
 				// want to do lateral velocity control and let the pixhawk take care of holding altitude
 				cmd.type_mask = custom_mask;
 
@@ -454,6 +465,8 @@ int ControlNode::run() {
 			}
 			case MissionElement::LandingPrep:
 			{
+				element_msg.data = 3;
+
 				// do this with full velocity control
 				cmd.type_mask = velocity_control_mask;
 
@@ -475,6 +488,8 @@ int ControlNode::run() {
 			}
 			case MissionElement::Landing:
 			{
+				element_msg.data = 4;
+
 				// velocity control in all directions
 				cmd.type_mask = velocity_control_mask;
 
@@ -512,6 +527,7 @@ int ControlNode::run() {
 				break;
 			}
 			default:
+				element_msg.data = 0;
 
 				// don't move -> 0 velocity
 				cmd.type_mask = velocity_control_mask;
@@ -530,6 +546,9 @@ int ControlNode::run() {
 		cmd.position = pos;
 		cmd.velocity = vel;
 		_cmd_pub.publish(cmd);
+
+		// publish the mission element
+		_mis_element_pub.publish(element_msg);
 
 		// remember need to always call spin once for the callbacks to trigger
 		ros::spinOnce();
