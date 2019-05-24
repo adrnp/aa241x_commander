@@ -506,8 +506,8 @@ int ControlNode::run() {
 				// z -> down (into the image in the image frame itself)
 
 				float xerr = _landing_range.pose.position.x;
-				float yerr = _landing_rage.pose.position.y;
-				float herr = sqrt(xerr^2 + yerr^2);
+				float yerr = _landing_range.pose.position.y;
+				float herr = sqrt(xerr*xerr + yerr*yerr);
 
 
 				float ve = _landing_vxy_p * _landing_range.pose.position.x;  // NOTE: there are also no safeguards if the target isn't seen...
