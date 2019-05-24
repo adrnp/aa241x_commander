@@ -91,6 +91,8 @@ private:
 	float _landing_vxy_p = 0.1f;
 	float _landing_max_vz = 1.0f;
 	float _landing_max_vxy = 1.0f;
+	float _landing_yr_p = 0.01f;
+	float _landing_max_yr = 0.1f;
 
 	// landing related information
 	float _last_range_time = 0.0f;
@@ -467,13 +469,13 @@ int ControlNode::run() {
 			{
 				element_msg.data = 3;
 
-				// do this with full velocity control
+				// velocity control in all directions
 				cmd.type_mask = velocity_control_mask;
 
 				// go to the estimated landing location
 				float ve = _vxy_p * (_landing_e - _current_local_pos.pose.position.x);
 				float vn = _vxy_p * (_landing_n - _current_local_pos.pose.position.y);
-				float vu = _vxy_p * (_search_height - _current_local_pos.pose.position.z);
+				float vu = -_vz_p * (_search_height - _current_local_pos.pose.position.z);
 
 				// saturate the commands
 				saturate(&ve, _max_vxy);
@@ -490,8 +492,8 @@ int ControlNode::run() {
 			{
 				element_msg.data = 4;
 
-				// velocity control in all directions
-				cmd.type_mask = velocity_control_mask;
+				// do this with full velocity control and yaw_rate control
+				cmd.type_mask = (velocity_control_mask | mavros_msgs::PositionTarget::IGNORE_YAW & ~mavros_msgs::PositionTarget::IGNORE_YAW_RATE);
 
 				// TODO: compute some gains for this.... might do it low for now
 
@@ -503,14 +505,34 @@ int ControlNode::run() {
 				// y -> out the back (down in the image frame itself)
 				// z -> down (into the image in the image frame itself)
 
+				float xerr = _landing_range.pose.position.x;
+				float yerr = _landing_rage.pose.position.y;
+				float herr = sqrt(xerr^2 + yerr^2);
+
+
 				float ve = _landing_vxy_p * _landing_range.pose.position.x;  // NOTE: there are also no safeguards if the target isn't seen...
 				float vn = -_landing_vxy_p * _landing_range.pose.position.y;
-				float vz = -_landing_vz_p * _landing_range.pose.position.z;		// NOTE: really should get over the tag before landing
+
+				// if not within a meter lateraly, just get to 2 meters over the tag
+				float vz, yaw_rate;
+				if (herr > 1.0f) {
+					vz = -_landing_vz_p * (2.0f - _landing_range.pose.position.z);
+					yaw_rate = _landing_yr_p * _landing_range.pose.orientation.z;
+				} else {
+					// want to come down quickly at this point and don't shift heading
+					if (_landing_range.pose.position.z <= 1.0f) {
+						vz = -1.0f;
+					} else {
+						vz = -_landing_vz_p * _landing_range.pose.position.z;
+					}
+					yaw_rate = 0.0f;
+				}
 
 				// saturating all of these for very slow motion
 				saturate(&ve, _landing_max_vxy);
 				saturate(&vn, _landing_max_vxy);
 				saturate(&vz, _landing_max_vz);
+				saturate(&yaw_rate, _landing_max_yr);
 
 				// TODO: for an actual landing strategy, would want to line up
 				// with the truck bed and then get on top of it and then come down
@@ -523,6 +545,9 @@ int ControlNode::run() {
 				vel.x = ve;
 				vel.y = vn;
 				vel.z = vz;
+
+				// set the yaw rate
+				cmd.yaw_rate = yaw_rate;
 
 				break;
 			}
