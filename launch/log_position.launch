@@ -11,6 +11,7 @@
 				/mavros/global_position/compass_hdg
 				/mavros/altitude
 				/mavros/time_reference
+				/landing_pose
 				/rosout" />
 
 </launch>

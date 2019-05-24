@@ -28,4 +28,10 @@
 	<!-- logging -->
 	<include file="$(find aa241x_commander)/launch/log_position.launch" />
 
+	<!-- log images -->
+	<node pkg="rosbag" type="record" name="images_bag"
+		args="-o $(env HOME)/rosbags/images_bag
+				/image
+				/landing_pose" />
+
 </launch>
