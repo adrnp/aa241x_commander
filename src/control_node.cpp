@@ -87,15 +87,15 @@ private:
 	float _max_vxy = 4.0f;
 
 	// landing related gain
-	float _landing_vz_p = 0.2f;
-	float _landing_vxy_p = 0.1f;
+	float _landing_vz_p = 0.5f;
+	float _landing_vxy_p = 0.5f;
 	float _landing_max_vz = 1.0f;
-	float _landing_max_vxy = 1.0f;
+	float _landing_max_vxy = 2.0f;
 	float _landing_yr_p = 0.01f;
 	float _landing_max_yr = 0.1f;
 
 	// landing related information
-	float _last_range_time = 0.0f;
+	double _last_range_time = 0.0f;
 	int _successive_range_count = 0;
 	int _successive_range_thresh = 5;
 	float _search_height = 5.0f;	// altitude above the lake level to come down to when landing in triggered
@@ -281,9 +281,12 @@ void ControlNode::landingPoseCallback(const geometry_msgs::PoseStamped::ConstPtr
 	// NOTE: this kind of check should probably be done in the vision node and not here,
 	// but putting it in here for now
 	if (_mission_element == MissionElement::LandingPrep && _successive_range_count >= _successive_range_thresh) {
+		ROS_INFO("going to landing phase!");
 		_mission_element = MissionElement::Landing;
 	} else if (_mission_element == MissionElement::Landing && _successive_range_count == 0) {
-		// if we are landing but we lose sight of the tags, go back to the prep position
+		ROS_INFO("lost sight of tag");
+
+        // if we are landing but we lose sight of the tags, go back to the prep position
 		_mission_element = MissionElement::LandingPrep;
 	}
 
@@ -467,7 +470,8 @@ int ControlNode::run() {
 			}
 			case MissionElement::LandingPrep:
 			{
-				element_msg.data = 3;
+                ROS_INFO("[MODE] landing prep");
+                element_msg.data = 3;
 
 				// velocity control in all directions
 				cmd.type_mask = velocity_control_mask;
@@ -475,7 +479,9 @@ int ControlNode::run() {
 				// go to the estimated landing location
 				float ve = _vxy_p * (_landing_e - _current_local_pos.pose.position.x);
 				float vn = _vxy_p * (_landing_n - _current_local_pos.pose.position.y);
-				float vu = -_vz_p * (_search_height - _current_local_pos.pose.position.z);
+				float vu = _vz_p * (_search_height - _current_local_pos.pose.position.z);
+
+                //ROS_INFO("search: %0.2f\tcurrent: %0.2f", _search_height, _current_local_pos.pose.position.z);
 
 				// saturate the commands
 				saturate(&ve, _max_vxy);
@@ -490,6 +496,7 @@ int ControlNode::run() {
 			}
 			case MissionElement::Landing:
 			{
+                ROS_INFO("[MODE] landing");
 				element_msg.data = 4;
 
 				// do this with full velocity control and yaw_rate control
@@ -505,9 +512,12 @@ int ControlNode::run() {
 				// y -> out the back (down in the image frame itself)
 				// z -> down (into the image in the image frame itself)
 
+                ROS_INFO("range vector: (%0.2f, %0.2f, %0.2f)", _landing_range.pose.position.x, _landing_range.pose.position.y, _landing_range.pose.position.z);
+
 				float xerr = _landing_range.pose.position.x;
 				float yerr = _landing_range.pose.position.y;
 				float herr = sqrt(xerr*xerr + yerr*yerr);
+                ROS_INFO("horiz error = %0.2f", herr);
 
 
 				float ve = _landing_vxy_p * _landing_range.pose.position.x;  // NOTE: there are also no safeguards if the target isn't seen...
@@ -515,8 +525,8 @@ int ControlNode::run() {
 
 				// if not within a meter lateraly, just get to 2 meters over the tag
 				float vz, yaw_rate;
-				if (herr > 1.0f) {
-					vz = -_landing_vz_p * (2.0f - _landing_range.pose.position.z);
+				if (herr > 0.3f) {
+					vz = _landing_vz_p * (2.0f - _landing_range.pose.position.z);
 					yaw_rate = _landing_yr_p * _landing_range.pose.orientation.z;
 				} else {
 					// want to come down quickly at this point and don't shift heading

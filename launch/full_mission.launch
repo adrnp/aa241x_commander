@@ -11,19 +11,28 @@
 	</include>
 
 	<include file="$(find aa241x_mission)/launch/aa241x_mission.launch" >
-		<!-- TODO: decide if this should be local or the one for the laptop -->
+		<arg name="landing_lat" value="37.423767" />
+		<arg name="landing_lon" value="-122.177559" />
 	</include>
 
 	<!-- the control node -->
 	<node pkg="aa241x_commander" type="control_node" name="control_node" output="screen" required="true">
+        <param name="start_in_landing" value="true" />
     </node>
 
     <!-- the imaging node -->
+<!--
     <node pkg="aa241x_vision" type="vision_node" name="vision_node" output="screen" required="true">
         <param name="debug" value="false" />
         <param name="tag_id" value="0" />
-        <param name="tag_size" value="0.09" />
+        <param name="tag_size" value="0.16" />
     </node>
+-->
+
+    <include file="$(find aa241x_vision)/launch/vision.launch" >
+        <arg name="tag_id" value="0" />
+        <arg name="tag_size" value="0.16" />
+    </include>
 
 	<!-- logging -->
 	<include file="$(find aa241x_commander)/launch/log_position.launch" />
