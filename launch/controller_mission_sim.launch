@@ -18,7 +18,8 @@
 
 	<!-- the control node -->
 	<node pkg="aa241x_commander" type="control_node" name="control_node" output="screen">
-		<param name="start_in_landing" value="true" />
+		<param name="start_in_landing" value="false" />
+		<param name="flight_altitude" value="60.0" />
     </node>
 
 	<!-- logging -->
