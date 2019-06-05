@@ -105,6 +105,7 @@ private:
 	// data
 	mavros_msgs::State _current_state;
 	geometry_msgs::PoseStamped _current_local_pos;
+	geometry_msgs::PoseStamped _current_ll_pos;
 	geometry_msgs::PoseStamped _landing_range;
 	float _takeoff_home_height = 0.0f;		// the z position of the drone when takeoff was commanded
 
@@ -125,6 +126,7 @@ private:
 	ros::Subscriber _sensor_meas_sub;	// mission sensor measurement
 	ros::Subscriber _mission_state_sub;	// mission state
 	ros::Subscriber _landing_range_sub;	// measurement from the imaging node
+	ros::Subscriber _lake_lag_pose_sub;	// lake lag frame position
 	// TODO: add subscribers here
 
 	// publishers
@@ -148,6 +150,7 @@ private:
 	 * @param msg pose stamped message type
 	 */
 	void localPosCallback(const geometry_msgs::PoseStamped::ConstPtr& msg);
+	void lakeLagPoseCallback(const geometry_msgs::PoseStamped::ConstPtr& msg);
 
 	/**
 	 * callback for the sensor measurement for the AA241x mission
@@ -193,6 +196,7 @@ _flight_speed(flight_speed)
 	_sensor_meas_sub =_nh.subscribe<aa241x_mission::SensorMeasurement>("measurement", 10, &ControlNode::sensorMeasCallback, this);
 	_mission_state_sub = _nh.subscribe<aa241x_mission::MissionState>("mission_state", 10, &ControlNode::missionStateCallback, this);
 	_landing_range_sub = _nh.subscribe<geometry_msgs::PoseStamped>("landing_pose", 10, &ControlNode::landingPoseCallback, this);
+	_lake_lag_pose_sub = _nh.subscribe<geometry_msgs::PoseStamped>("geodetic_based_lake_lag_pose", 10, &ControlNode::lakeLagPoseCallback, this);
 
 	// advertise the published detailed
 
@@ -214,6 +218,7 @@ void ControlNode::stateCallback(const mavros_msgs::State::ConstPtr& msg) {
 void ControlNode::localPosCallback(const geometry_msgs::PoseStamped::ConstPtr& msg) {
 	// save the current local position locally to be used in the main loop
 	// TODO: account for offset to convert from PX4 coordinate to lake lag frame
+	/*
 	_current_local_pos = *msg;
 
 	// update adjust the local position with the offset information to convert
@@ -221,6 +226,38 @@ void ControlNode::localPosCallback(const geometry_msgs::PoseStamped::ConstPtr& m
 	_current_local_pos.pose.position.x += _e_offset;
 	_current_local_pos.pose.position.y += _n_offset;
 	_current_local_pos.pose.position.z += _u_offset;
+
+	// check to see if have completed the waypoint
+	// NOTE: for this case we only have a single waypoint
+	switch (_mission_element) {
+		case MissionElement::None:
+			// NOTE: nothing to do here, waiting on the state to be connected
+			break;
+		case MissionElement::Takeoff:
+			// check condition on being "close enough" to the waypoint
+			ROS_INFO("altitude left: %0.2f", abs(_current_local_pos.pose.position.z - _target_alt));
+			if (abs(_current_local_pos.pose.position.z - _target_alt) < 0.5) {
+				ROS_INFO("takeoff completed!");
+
+				// change to being in the searching state
+				_mission_element = MissionElement::Searching;
+			}
+
+			break;
+		case MissionElement::Searching:
+			break;
+		case MissionElement::Landing:
+			break;
+		default:
+			break;
+	}
+	*/
+}
+
+void ControlNode::lakeLagPoseCallback(const geometry_msgs::PoseStamped::ConstPtr& msg) {
+	// save the current local position locally to be used in the main loop
+	// TODO: account for offset to convert from PX4 coordinate to lake lag frame
+	_current_local_pos = *msg;
 
 	// check to see if have completed the waypoint
 	// NOTE: for this case we only have a single waypoint
